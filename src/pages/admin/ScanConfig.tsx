@@ -29,7 +29,7 @@ export default function ScanConfig() {
       if (error) throw error;
       setConfig(data);
     } catch (error) {
-      console.error('Error fetching config:', error);
+      if (import.meta.env.DEV) console.error('Error fetching config:', error);
       toast.error('Failed to load scan configuration');
     } finally {
       setIsLoading(false);
@@ -61,7 +61,7 @@ export default function ScanConfig() {
 
       toast.success('Scan configuration saved');
     } catch (error) {
-      console.error('Error saving config:', error);
+      if (import.meta.env.DEV) console.error('Error saving config:', error);
       toast.error('Failed to save configuration');
     } finally {
       setIsSaving(false);
