@@ -73,7 +73,7 @@ export default function SignalDetail() {
         if (error) throw error;
         setSignal(data);
       } catch (error) {
-        console.error('Error fetching signal:', error);
+        if (import.meta.env.DEV) console.error('Error fetching signal:', error);
       } finally {
         setIsLoading(false);
       }

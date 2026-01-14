@@ -43,7 +43,7 @@ export default function DataManagement() {
       if (error) throw error;
       setPairMetrics(data || []);
     } catch (error) {
-      console.error('Error fetching pair metrics:', error);
+      if (import.meta.env.DEV) console.error('Error fetching pair metrics:', error);
       toast.error('Failed to load pair metrics');
     } finally {
       setIsLoadingMetrics(false);
@@ -61,7 +61,7 @@ export default function DataManagement() {
       if (error) throw error;
       setSignals(data || []);
     } catch (error) {
-      console.error('Error fetching signals:', error);
+      if (import.meta.env.DEV) console.error('Error fetching signals:', error);
       toast.error('Failed to load signals');
     } finally {
       setIsLoadingSignals(false);
@@ -116,7 +116,7 @@ export default function DataManagement() {
       fetchPairMetrics();
       fetchSignals();
     } catch (error) {
-      console.error('Error seeding data:', error);
+      if (import.meta.env.DEV) console.error('Error seeding data:', error);
       toast.error('Failed to seed mock data');
     } finally {
       setIsSeeding(false);
@@ -133,7 +133,7 @@ export default function DataManagement() {
       fetchPairMetrics();
       fetchSignals();
     } catch (error) {
-      console.error('Error clearing data:', error);
+      if (import.meta.env.DEV) console.error('Error clearing data:', error);
       toast.error('Failed to clear data');
     }
   };

@@ -57,7 +57,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single();
 
       if (profileError) {
-        console.error('Error fetching profile:', profileError);
+        if (import.meta.env.DEV) console.error('Error fetching profile:', profileError);
       } else {
         setProfile(profileData);
       }
@@ -69,12 +69,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('user_id', userId);
 
       if (rolesError) {
-        console.error('Error fetching roles:', rolesError);
+        if (import.meta.env.DEV) console.error('Error fetching roles:', rolesError);
       } else {
         setRoles(rolesData?.map(r => r.role) || []);
       }
     } catch (error) {
-      console.error('Error in fetchUserData:', error);
+      if (import.meta.env.DEV) console.error('Error in fetchUserData:', error);
     }
   };
 

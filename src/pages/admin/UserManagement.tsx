@@ -99,7 +99,7 @@ export default function UserManagement() {
 
       setUsers(usersWithRoles);
     } catch (error) {
-      console.error('Error fetching users:', error);
+      if (import.meta.env.DEV) console.error('Error fetching users:', error);
       toast.error('Failed to load users');
     } finally {
       setIsLoading(false);
@@ -124,7 +124,7 @@ export default function UserManagement() {
       setActionDialog({ type: null, user: null });
       fetchUsers();
     } catch (error) {
-      console.error('Error approving user:', error);
+      if (import.meta.env.DEV) console.error('Error approving user:', error);
       toast.error('Failed to approve user');
     } finally {
       setIsProcessing(false);
@@ -145,7 +145,7 @@ export default function UserManagement() {
       setActionDialog({ type: null, user: null });
       fetchUsers();
     } catch (error) {
-      console.error('Error disabling user:', error);
+      if (import.meta.env.DEV) console.error('Error disabling user:', error);
       toast.error('Failed to disable user');
     } finally {
       setIsProcessing(false);
@@ -166,7 +166,7 @@ export default function UserManagement() {
       setActionDialog({ type: null, user: null });
       fetchUsers();
     } catch (error) {
-      console.error('Error enabling user:', error);
+      if (import.meta.env.DEV) console.error('Error enabling user:', error);
       toast.error('Failed to enable user');
     } finally {
       setIsProcessing(false);
@@ -186,7 +186,7 @@ export default function UserManagement() {
       setActionDialog({ type: null, user: null });
       fetchUsers();
     } catch (error) {
-      console.error('Error making admin:', error);
+      if (import.meta.env.DEV) console.error('Error making admin:', error);
       toast.error('Failed to grant admin role');
     } finally {
       setIsProcessing(false);
@@ -208,7 +208,7 @@ export default function UserManagement() {
       setActionDialog({ type: null, user: null });
       fetchUsers();
     } catch (error) {
-      console.error('Error removing admin:', error);
+      if (import.meta.env.DEV) console.error('Error removing admin:', error);
       toast.error('Failed to remove admin role');
     } finally {
       setIsProcessing(false);
