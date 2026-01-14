@@ -10,6 +10,7 @@ import Auth from "@/pages/Auth";
 import Pending from "@/pages/Pending";
 import Disabled from "@/pages/Disabled";
 import Dashboard from "@/pages/Dashboard";
+import SignalDetail from "@/pages/SignalDetail";
 import History from "@/pages/History";
 import Settings from "@/pages/Settings";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
@@ -33,6 +34,7 @@ const App = () => (
               <Route path="/pending" element={<Pending />} />
               <Route path="/disabled" element={<Disabled />} />
               <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/signal/:id" element={<ProtectedRoute><SignalDetail /></ProtectedRoute>} />
               <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
