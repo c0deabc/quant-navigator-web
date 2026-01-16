@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, Database, Plus, Trash2, RefreshCw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { logAuditEvent } from '@/lib/audit';
 import type { Database as DB } from '@/integrations/supabase/types';
 
 type PairMetrics = DB['public']['Tables']['pair_metrics']['Row'];
@@ -112,6 +113,16 @@ export default function DataManagement() {
         if (signalsError) throw signalsError;
       }
 
+      await logAuditEvent({
+        action: 'mock_data_seeded',
+        entityType: 'data_management',
+        entityId: null,
+        details: {
+          pairs_upserted: insertedPairs?.length ?? 0,
+          signals_inserted: insertedPairs?.length ?? 0,
+        },
+      });
+
       toast.success('Mock data seeded successfully');
       fetchPairMetrics();
       fetchSignals();
@@ -128,6 +139,13 @@ export default function DataManagement() {
       // Delete signals first (foreign key constraint)
       await supabase.from('signals').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('pair_metrics').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+      await logAuditEvent({
+        action: 'data_cleared_all',
+        entityType: 'data_management',
+        entityId: null,
+        details: { tables: ['signals', 'pair_metrics'] },
+      });
 
       toast.success('All data cleared');
       fetchPairMetrics();
