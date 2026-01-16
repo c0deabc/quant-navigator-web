@@ -5,10 +5,27 @@ export interface IndicatorDataPoint {
   value: number;
 }
 
+export interface OHLCDataPoint {
+  time: Time;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 export interface ArrowSignal {
   time: Time;
   price: number;
   direction: 'long' | 'short';
+  position: 'aboveBar' | 'belowBar';
+}
+
+export interface PriceBands {
+  upperBand2: IndicatorDataPoint[];
+  upperBand1: IndicatorDataPoint[];
+  meanLine: IndicatorDataPoint[];
+  lowerBand1: IndicatorDataPoint[];
+  lowerBand2: IndicatorDataPoint[];
 }
 
 /**
@@ -22,12 +39,10 @@ export function computeZScore(
   
   for (let i = 0; i < prices.length; i++) {
     if (i < length - 1) {
-      // Not enough data for full window
       result.push({ time: prices[i].time, value: 0 });
       continue;
     }
     
-    // Get rolling window
     const window = prices.slice(i - length + 1, i + 1).map(p => p.value);
     const mean = window.reduce((a, b) => a + b, 0) / length;
     const variance = window.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / length;
@@ -38,6 +53,53 @@ export function computeZScore(
   }
   
   return result;
+}
+
+/**
+ * Compute rolling mean and standard deviation for price-space bands
+ */
+export function computeRollingMeanStd(
+  prices: IndicatorDataPoint[],
+  length: number = 250
+): { mean: IndicatorDataPoint[]; std: IndicatorDataPoint[] } {
+  const meanResult: IndicatorDataPoint[] = [];
+  const stdResult: IndicatorDataPoint[] = [];
+  
+  for (let i = 0; i < prices.length; i++) {
+    if (i < length - 1) {
+      meanResult.push({ time: prices[i].time, value: prices[i].value });
+      stdResult.push({ time: prices[i].time, value: 0 });
+      continue;
+    }
+    
+    const window = prices.slice(i - length + 1, i + 1).map(p => p.value);
+    const mean = window.reduce((a, b) => a + b, 0) / length;
+    const variance = window.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / length;
+    const std = Math.sqrt(variance);
+    
+    meanResult.push({ time: prices[i].time, value: mean });
+    stdResult.push({ time: prices[i].time, value: std });
+  }
+  
+  return { mean: meanResult, std: stdResult };
+}
+
+/**
+ * Generate price-space Z-Score bands (mean ± n*std mapped to price)
+ */
+export function computePriceBands(
+  prices: IndicatorDataPoint[],
+  length: number = 250
+): PriceBands {
+  const { mean, std } = computeRollingMeanStd(prices, length);
+  
+  return {
+    upperBand2: mean.map((m, i) => ({ time: m.time, value: m.value + 2 * std[i].value })),
+    upperBand1: mean.map((m, i) => ({ time: m.time, value: m.value + 1 * std[i].value })),
+    meanLine: mean,
+    lowerBand1: mean.map((m, i) => ({ time: m.time, value: m.value - 1 * std[i].value })),
+    lowerBand2: mean.map((m, i) => ({ time: m.time, value: m.value - 2 * std[i].value })),
+  };
 }
 
 /**
@@ -69,7 +131,6 @@ export function computeRSI(
       continue;
     }
     
-    // Calculate average gain and loss
     const windowGains = gains.slice(-length);
     const windowLosses = losses.slice(-length);
     
@@ -86,31 +147,10 @@ export function computeRSI(
 }
 
 /**
- * Generate Z-Score bands (mean and ±n standard deviations)
- */
-export function computeZScoreBands(
-  zScoreData: IndicatorDataPoint[]
-): {
-  upperBand2: IndicatorDataPoint[];
-  upperBand1: IndicatorDataPoint[];
-  meanLine: IndicatorDataPoint[];
-  lowerBand1: IndicatorDataPoint[];
-  lowerBand2: IndicatorDataPoint[];
-} {
-  return {
-    upperBand2: zScoreData.map(d => ({ time: d.time, value: 2 })),
-    upperBand1: zScoreData.map(d => ({ time: d.time, value: 1 })),
-    meanLine: zScoreData.map(d => ({ time: d.time, value: 0 })),
-    lowerBand1: zScoreData.map(d => ({ time: d.time, value: -1 })),
-    lowerBand2: zScoreData.map(d => ({ time: d.time, value: -2 })),
-  };
-}
-
-/**
- * Generate combined Z-Score + RSI arrow signals
+ * Generate combined Z-Score + RSI arrow signals with configurable thresholds
  */
 export function computeZScoreRSIArrows(
-  syntheticPrices: IndicatorDataPoint[],
+  ohlcData: OHLCDataPoint[],
   zScoreData: IndicatorDataPoint[],
   rsiData: IndicatorDataPoint[],
   zScoreThreshold: number = 2,
@@ -119,19 +159,29 @@ export function computeZScoreRSIArrows(
 ): ArrowSignal[] {
   const signals: ArrowSignal[] = [];
   
-  for (let i = 0; i < syntheticPrices.length; i++) {
+  for (let i = 0; i < ohlcData.length; i++) {
     const zScore = zScoreData[i]?.value ?? 0;
     const rsi = rsiData[i]?.value ?? 50;
-    const price = syntheticPrices[i].value;
-    const time = syntheticPrices[i].time;
+    const candle = ohlcData[i];
+    const time = candle.time;
     
-    // Short signal: Z-Score > +2 AND RSI > 70
+    // Short signal: Z-Score > +threshold AND RSI > overbought
     if (zScore > zScoreThreshold && rsi > rsiOverbought) {
-      signals.push({ time, price, direction: 'short' });
+      signals.push({ 
+        time, 
+        price: candle.high, 
+        direction: 'short',
+        position: 'aboveBar'
+      });
     }
-    // Long signal: Z-Score < -2 AND RSI < 30
+    // Long signal: Z-Score < -threshold AND RSI < oversold
     else if (zScore < -zScoreThreshold && rsi < rsiOversold) {
-      signals.push({ time, price, direction: 'long' });
+      signals.push({ 
+        time, 
+        price: candle.low, 
+        direction: 'long',
+        position: 'belowBar'
+      });
     }
   }
   
@@ -139,7 +189,76 @@ export function computeZScoreRSIArrows(
 }
 
 /**
- * Generate synthetic pair price data (Price A / Price B)
+ * Generate synthetic pair OHLC data (Ratio = A/B)
+ */
+export function generateSyntheticPairOHLC(
+  priceA: number,
+  priceB: number,
+  numPoints: number = 250,
+  volatility: number = 0.02
+): OHLCDataPoint[] {
+  const data: OHLCDataPoint[] = [];
+  const start = Date.now() - numPoints * 15 * 60 * 1000; // 15min bars
+  
+  let currentOpenA = priceA;
+  let currentOpenB = priceB;
+  
+  for (let i = 0; i < numPoints; i++) {
+    const time = Math.floor((start + i * 15 * 60 * 1000) / 1000) as Time;
+    
+    // Generate OHLC for symbol A
+    const moveA = (Math.random() - 0.5) * volatility;
+    const highMoveA = Math.random() * volatility * 0.5;
+    const lowMoveA = Math.random() * volatility * 0.5;
+    
+    const openA = currentOpenA;
+    const closeA = openA * (1 + moveA);
+    const highA = Math.max(openA, closeA) * (1 + highMoveA);
+    const lowA = Math.min(openA, closeA) * (1 - lowMoveA);
+    
+    // Generate OHLC for symbol B (correlated with A)
+    const sharedMove = moveA * 0.7; // 70% correlation
+    const idioB = (Math.random() - 0.5) * volatility * 0.5;
+    const moveB = sharedMove + idioB;
+    const highMoveB = Math.random() * volatility * 0.5;
+    const lowMoveB = Math.random() * volatility * 0.5;
+    
+    const openB = currentOpenB;
+    const closeB = openB * (1 + moveB);
+    const highB = Math.max(openB, closeB) * (1 + highMoveB);
+    const lowB = Math.min(openB, closeB) * (1 - lowMoveB);
+    
+    // Compute ratio OHLC
+    const ratioOpen = openA / openB;
+    const ratioHigh = highA / highB;
+    const ratioLow = lowA / lowB;
+    const ratioClose = closeA / closeB;
+    
+    data.push({
+      time,
+      open: ratioOpen,
+      high: Math.max(ratioOpen, ratioHigh, ratioLow, ratioClose),
+      low: Math.min(ratioOpen, ratioHigh, ratioLow, ratioClose),
+      close: ratioClose,
+    });
+    
+    // Update for next bar
+    currentOpenA = closeA;
+    currentOpenB = closeB;
+  }
+  
+  return data;
+}
+
+/**
+ * Convert OHLC data to close prices for indicator calculation
+ */
+export function ohlcToClose(ohlcData: OHLCDataPoint[]): IndicatorDataPoint[] {
+  return ohlcData.map(d => ({ time: d.time, value: d.close }));
+}
+
+/**
+ * Generate synthetic pair price data (Price A / Price B) - Legacy function
  */
 export function generateSyntheticPairPrice(
   priceA: number,
@@ -147,27 +266,6 @@ export function generateSyntheticPairPrice(
   numPoints: number = 250,
   volatility: number = 0.02
 ): IndicatorDataPoint[] {
-  const data: IndicatorDataPoint[] = [];
-  const start = Date.now() - numPoints * 15 * 60 * 1000; // 15min bars
-  
-  let currentPriceA = priceA;
-  let currentPriceB = priceB;
-  
-  for (let i = 0; i < numPoints; i++) {
-    const time = Math.floor((start + i * 15 * 60 * 1000) / 1000) as Time;
-    
-    // Add correlated random walks with mean reversion
-    const sharedMove = (Math.random() - 0.5) * volatility;
-    const idioA = (Math.random() - 0.5) * volatility * 0.3;
-    const idioB = (Math.random() - 0.5) * volatility * 0.3;
-    
-    currentPriceA = currentPriceA * (1 + sharedMove + idioA);
-    currentPriceB = currentPriceB * (1 + sharedMove + idioB);
-    
-    // Synthetic price = A / B
-    const syntheticPrice = currentPriceA / currentPriceB;
-    data.push({ time, value: syntheticPrice });
-  }
-  
-  return data;
+  const ohlc = generateSyntheticPairOHLC(priceA, priceB, numPoints, volatility);
+  return ohlcToClose(ohlc);
 }
