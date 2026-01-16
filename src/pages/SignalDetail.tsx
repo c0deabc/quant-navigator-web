@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import PriceChart from '@/components/charts/PriceChart';
 import SpreadChart from '@/components/charts/SpreadChart';
 import ZScoreChart from '@/components/charts/ZScoreChart';
+import SyntheticPairChart from '@/components/charts/SyntheticPairChart';
 import { generateSignalChartData, SignalChartData } from '@/lib/mockChartData';
 import { supabase } from '@/integrations/supabase/client';
 import type { Database } from '@/integrations/supabase/types';
@@ -329,6 +330,25 @@ export default function SignalDetail() {
                 </span>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Synthetic Pair Chart with Z-Score + RSI Arrows */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Synthetic Pair Price</CardTitle>
+            <CardDescription>
+              {displayData.symbolA}/{displayData.symbolB} ratio with Z-Score + RSI combined signals
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SyntheticPairChart
+              entryPriceA={displayData.entryPriceA}
+              entryPriceB={displayData.entryPriceB}
+              symbolA={displayData.symbolA}
+              symbolB={displayData.symbolB}
+              height={400}
+            />
           </CardContent>
         </Card>
 
