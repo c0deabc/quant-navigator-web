@@ -44,6 +44,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { logAuditEvent } from '@/lib/audit';
 import type { Database } from '@/integrations/supabase/types';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
@@ -120,6 +121,18 @@ export default function UserManagement() {
 
       if (error) throw error;
 
+      await logAuditEvent({
+        action: 'user_approved',
+        entityType: 'profile',
+        entityId: user.user_id,
+        details: {
+          target_user_id: user.user_id,
+          target_email: user.email,
+          target_display_name: user.display_name,
+          new_status: 'active',
+        },
+      });
+
       toast.success(`${user.display_name || user.email} has been approved`);
       setActionDialog({ type: null, user: null });
       fetchUsers();
@@ -140,6 +153,18 @@ export default function UserManagement() {
         .eq('user_id', user.user_id);
 
       if (error) throw error;
+
+      await logAuditEvent({
+        action: 'user_disabled',
+        entityType: 'profile',
+        entityId: user.user_id,
+        details: {
+          target_user_id: user.user_id,
+          target_email: user.email,
+          target_display_name: user.display_name,
+          new_status: 'disabled',
+        },
+      });
 
       toast.success(`${user.display_name || user.email} has been disabled`);
       setActionDialog({ type: null, user: null });
@@ -162,6 +187,18 @@ export default function UserManagement() {
 
       if (error) throw error;
 
+      await logAuditEvent({
+        action: 'user_enabled',
+        entityType: 'profile',
+        entityId: user.user_id,
+        details: {
+          target_user_id: user.user_id,
+          target_email: user.email,
+          target_display_name: user.display_name,
+          new_status: 'active',
+        },
+      });
+
       toast.success(`${user.display_name || user.email} has been enabled`);
       setActionDialog({ type: null, user: null });
       fetchUsers();
@@ -181,6 +218,17 @@ export default function UserManagement() {
         .insert({ user_id: user.user_id, role: 'admin' as AppRole });
 
       if (error) throw error;
+
+      await logAuditEvent({
+        action: 'role_granted',
+        entityType: 'user_roles',
+        entityId: user.user_id,
+        details: {
+          target_user_id: user.user_id,
+          target_email: user.email,
+          role: 'admin',
+        },
+      });
 
       toast.success(`${user.display_name || user.email} is now an admin`);
       setActionDialog({ type: null, user: null });
@@ -203,6 +251,17 @@ export default function UserManagement() {
         .eq('role', 'admin');
 
       if (error) throw error;
+
+      await logAuditEvent({
+        action: 'role_revoked',
+        entityType: 'user_roles',
+        entityId: user.user_id,
+        details: {
+          target_user_id: user.user_id,
+          target_email: user.email,
+          role: 'admin',
+        },
+      });
 
       toast.success(`Admin role removed from ${user.display_name || user.email}`);
       setActionDialog({ type: null, user: null });

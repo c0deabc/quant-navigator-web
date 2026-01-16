@@ -10,6 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { ArrowLeft, Save, RefreshCw, Clock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { logAuditEvent } from '@/lib/audit';
 import type { Database } from '@/integrations/supabase/types';
 
 type ScanConfig = Database['public']['Tables']['global_scan_config']['Row'];
@@ -58,6 +59,20 @@ export default function ScanConfig() {
         .eq('id', config.id);
 
       if (error) throw error;
+
+      await logAuditEvent({
+        action: 'scan_config_updated',
+        entityType: 'global_scan_config',
+        entityId: config.id,
+        details: {
+          scan_interval_minutes: config.scan_interval_minutes,
+          min_volume_filter: config.min_volume_filter,
+          correlation_threshold: config.correlation_threshold,
+          cointegration_pvalue_limit: config.cointegration_pvalue_limit,
+          ou_theta_min: config.ou_theta_min,
+          hurst_max: config.hurst_max,
+        },
+      });
 
       toast.success('Scan configuration saved');
     } catch (error) {
