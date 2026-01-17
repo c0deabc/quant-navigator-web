@@ -187,13 +187,13 @@ export default function DataManagement() {
           </CardHeader>
           <CardContent>
             <div className="flex gap-3">
-              <Button onClick={seedMockData} disabled={isSeeding}>
-                {isSeeding ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                Seed Mock Data
+             # <Button onClick={seedMockData} disabled={isSeeding}>
+             #   {isSeeding ? (
+              #    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+               # ) : (
+                #  <Plus className="mr-2 h-4 w-4" />
+               # )}
+              #  Seed Mock Data
               </Button>
               <Button variant="outline" onClick={() => { fetchPairMetrics(); fetchSignals(); }}>
                 <RefreshCw className="mr-2 h-4 w-4" />
