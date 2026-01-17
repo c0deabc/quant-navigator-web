@@ -13,7 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Database, Plus, Trash2, RefreshCw, Loader2 } from 'lucide-react';
+import { ArrowLeft, Database, Trash2, RefreshCw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { logAuditEvent } from '@/lib/audit';
@@ -26,12 +26,38 @@ interface SignalWithPair extends Signal {
   pair_metrics: PairMetrics | null;
 }
 
+function directionLabel(signalDirection: string | null | undefined): { label: string; variantClass: string; isLong: boolean } {
+  const dir = (signalDirection ?? '').toLowerCase();
+
+  // Support both formats:
+  // - lovable mock: long_a_short_b / short_a_long_b
+  // - python simple: LONG / SHORT
+  const isLongA =
+    dir === 'long' ||
+    dir === 'buy' ||
+    dir === 'long_a_short_b';
+
+  const isShortA =
+    dir === 'short' ||
+    dir === 'sell' ||
+    dir === 'short_a_long_b';
+
+  if (isLongA) {
+    return { label: 'Long A', variantClass: 'text-long border-long/50', isLong: true };
+  }
+  if (isShortA) {
+    return { label: 'Short A', variantClass: 'text-short border-short/50', isLong: false };
+  }
+
+  // Unknown / legacy
+  return { label: signalDirection ?? '—', variantClass: 'text-muted-foreground border-muted/50', isLong: false };
+}
+
 export default function DataManagement() {
   const [pairMetrics, setPairMetrics] = useState<PairMetrics[]>([]);
   const [signals, setSignals] = useState<SignalWithPair[]>([]);
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(true);
   const [isLoadingSignals, setIsLoadingSignals] = useState(true);
-  const [isSeeding, setIsSeeding] = useState(false);
 
   const fetchPairMetrics = async () => {
     setIsLoadingMetrics(true);
@@ -73,66 +99,6 @@ export default function DataManagement() {
     fetchPairMetrics();
     fetchSignals();
   }, []);
-
-  const seedMockData = async () => {
-    setIsSeeding(true);
-    try {
-      // Insert mock pair metrics
-      const mockPairs = [
-        { symbol_a: 'BTCUSDT', symbol_b: 'ETHUSDT', correlation: 0.89, cointegration_pvalue: 0.02, ou_theta: 0.045, half_life_hours: 18, beta: 0.72, hurst_exponent: 0.38 },
-        { symbol_a: 'SOLUSDT', symbol_b: 'AVAXUSDT', correlation: 0.76, cointegration_pvalue: 0.04, ou_theta: 0.032, half_life_hours: 24, beta: 0.85, hurst_exponent: 0.42 },
-        { symbol_a: 'LINKUSDT', symbol_b: 'AAVEUSDT', correlation: 0.82, cointegration_pvalue: 0.01, ou_theta: 0.028, half_life_hours: 32, beta: 0.68, hurst_exponent: 0.35 },
-        { symbol_a: 'BNBUSDT', symbol_b: 'MATICUSDT', correlation: 0.71, cointegration_pvalue: 0.05, ou_theta: 0.038, half_life_hours: 28, beta: 0.91, hurst_exponent: 0.44 },
-        { symbol_a: 'DOGEUSDT', symbol_b: 'SHIBUSDT', correlation: 0.94, cointegration_pvalue: 0.008, ou_theta: 0.055, half_life_hours: 14, beta: 0.95, hurst_exponent: 0.31 },
-      ];
-
-      const { data: insertedPairs, error: pairsError } = await supabase
-        .from('pair_metrics')
-        .upsert(mockPairs, { onConflict: 'symbol_a,symbol_b' })
-        .select();
-
-      if (pairsError) throw pairsError;
-
-      // Insert mock signals for each pair
-      if (insertedPairs) {
-        const mockSignals = insertedPairs.map((pair, idx) => ({
-          pair_metrics_id: pair.id,
-          z_ou_score: [2.34, -1.98, 2.85, -2.12, 1.67][idx],
-          usd_spread: [125.50, -45.20, 89.30, -67.80, 12.40][idx],
-          entry_price_a: [45000, 120, 18, 320, 0.12][idx],
-          entry_price_b: [2800, 35, 95, 0.85, 0.000012][idx],
-          signal_direction: idx % 2 === 0 ? 'long_a_short_b' : 'short_a_long_b',
-          confidence_score: [0.85, 0.72, 0.91, 0.68, 0.59][idx],
-          expires_at: new Date(Date.now() + (12 + idx * 3) * 60 * 1000).toISOString(),
-        }));
-
-        const { error: signalsError } = await supabase
-          .from('signals')
-          .insert(mockSignals);
-
-        if (signalsError) throw signalsError;
-      }
-
-      await logAuditEvent({
-        action: 'mock_data_seeded',
-        entityType: 'data_management',
-        entityId: null,
-        details: {
-          pairs_upserted: insertedPairs?.length ?? 0,
-          signals_inserted: insertedPairs?.length ?? 0,
-        },
-      });
-
-      toast.success('Mock data seeded successfully');
-      fetchPairMetrics();
-      fetchSignals();
-    } catch (error) {
-      if (import.meta.env.DEV) console.error('Error seeding data:', error);
-      toast.error('Failed to seed mock data');
-    } finally {
-      setIsSeeding(false);
-    }
-  };
 
   const clearAllData = async () => {
     try {
@@ -182,19 +148,11 @@ export default function DataManagement() {
               Data Actions
             </CardTitle>
             <CardDescription>
-              Seed mock data for testing or clear existing data
+              Refresh live data from Supabase or clear existing data
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex gap-3">
-             # <Button onClick={seedMockData} disabled={isSeeding}>
-             #   {isSeeding ? (
-              #    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-               # ) : (
-                #  <Plus className="mr-2 h-4 w-4" />
-               # )}
-              #  Seed Mock Data
-              </Button>
               <Button variant="outline" onClick={() => { fetchPairMetrics(); fetchSignals(); }}>
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Refresh
@@ -243,7 +201,7 @@ export default function DataManagement() {
                       {pairMetrics.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                            No pair metrics data. Click "Seed Mock Data" to add sample data.
+                            No pair metrics yet. Run your scanner to populate data.
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -271,7 +229,7 @@ export default function DataManagement() {
                               {pair.hurst_exponent?.toFixed(3)}
                             </TableCell>
                             <TableCell className="text-muted-foreground text-sm">
-                              {new Date(pair.last_updated).toLocaleString()}
+                              {pair.last_updated ? new Date(pair.last_updated).toLocaleString() : '—'}
                             </TableCell>
                           </TableRow>
                         ))
@@ -303,37 +261,43 @@ export default function DataManagement() {
                       {signals.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                            No signals. Seed mock data to see sample signals.
+                            No signals yet. Run your scanner to populate data.
                           </TableCell>
                         </TableRow>
                       ) : (
-                        signals.map((signal) => (
-                          <TableRow key={signal.id}>
-                            <TableCell className="font-mono font-medium">
-                              {signal.pair_metrics?.symbol_a} / {signal.pair_metrics?.symbol_b}
-                            </TableCell>
-                            <TableCell className={`text-right font-mono ${Number(signal.z_ou_score) > 0 ? 'text-long' : 'text-short'}`}>
-                              {Number(signal.z_ou_score) > 0 ? '+' : ''}{Number(signal.z_ou_score).toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-right font-mono">
-                              ${Math.abs(Number(signal.usd_spread || 0)).toFixed(2)}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={signal.signal_direction === 'long_a_short_b' ? 'text-long border-long/50' : 'text-short border-short/50'}>
-                                {signal.signal_direction === 'long_a_short_b' ? 'Long A' : 'Short A'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right font-mono">
-                              {((signal.confidence_score || 0) * 100).toFixed(0)}%
-                            </TableCell>
-                            <TableCell className="text-muted-foreground text-sm">
-                              {new Date(signal.expires_at).toLocaleTimeString()}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground text-sm">
-                              {new Date(signal.created_at).toLocaleString()}
-                            </TableCell>
-                          </TableRow>
-                        ))
+                        signals.map((signal) => {
+                          const dir = directionLabel(signal.signal_direction);
+                          const z = Number(signal.z_ou_score ?? 0);
+                          return (
+                            <TableRow key={signal.id}>
+                              <TableCell className="font-mono font-medium">
+                                {signal.pair_metrics?.symbol_a ?? '—'} / {signal.pair_metrics?.symbol_b ?? '—'}
+                              </TableCell>
+                              <TableCell className={`text-right font-mono ${z > 0 ? 'text-long' : 'text-short'}`}>
+                                {z > 0 ? '+' : ''}{z.toFixed(2)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                ${Math.abs(Number(signal.usd_spread || 0)).toFixed(2)}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={dir.variantClass}>
+                                  {dir.label}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {signal.confidence_score == null
+                                  ? '—'
+                                  : `${(Number(signal.confidence_score) * 100).toFixed(0)}%`}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground text-sm">
+                                {signal.expires_at ? new Date(signal.expires_at).toLocaleTimeString() : '—'}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground text-sm">
+                                {signal.created_at ? new Date(signal.created_at).toLocaleString() : '—'}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
                       )}
                     </TableBody>
                   </Table>
