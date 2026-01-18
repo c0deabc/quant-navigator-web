@@ -21,78 +21,20 @@ import {
   RefreshCw,
   Eye,
   ArrowUpDown,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 
-// Mock data for signals
-const mockSignals = [
-  {
-    id: '1',
-    symbolA: 'BTCUSDT',
-    symbolB: 'ETHUSDT',
-    zScore: 2.34,
-    usdSpread: 125.50,
-    correlation: 0.89,
-    halfLife: 18,
-    direction: 'long_a_short_b' as const,
-    confidence: 0.85,
-    expiresIn: 12,
-  },
-  {
-    id: '2',
-    symbolA: 'SOLUSDT',
-    symbolB: 'AVAXUSDT',
-    zScore: -1.98,
-    usdSpread: -45.20,
-    correlation: 0.76,
-    halfLife: 24,
-    direction: 'short_a_long_b' as const,
-    confidence: 0.72,
-    expiresIn: 8,
-  },
-  {
-    id: '3',
-    symbolA: 'LINKUSDT',
-    symbolB: 'AAVEUSDT',
-    zScore: 2.85,
-    usdSpread: 89.30,
-    correlation: 0.82,
-    halfLife: 32,
-    direction: 'long_a_short_b' as const,
-    confidence: 0.91,
-    expiresIn: 15,
-  },
-  {
-    id: '4',
-    symbolA: 'BNBUSDT',
-    symbolB: 'MATICUSDT',
-    zScore: -2.12,
-    usdSpread: -67.80,
-    correlation: 0.71,
-    halfLife: 28,
-    direction: 'short_a_long_b' as const,
-    confidence: 0.68,
-    expiresIn: 5,
-  },
-  {
-    id: '5',
-    symbolA: 'DOGEUSDT',
-    symbolB: 'SHIBUSDT',
-    zScore: 1.67,
-    usdSpread: 12.40,
-    correlation: 0.94,
-    halfLife: 14,
-    direction: 'long_a_short_b' as const,
-    confidence: 0.59,
-    expiresIn: 18,
-  },
-];
+type Signal = Database['public']['Tables']['signals']['Row'];
+type PairMetrics = Database['public']['Tables']['pair_metrics']['Row'];
+type GlobalScanConfig = Database['public']['Tables']['global_scan_config']['Row'];
 
-const mockScanStatus = {
-  lastScan: new Date(Date.now() - 8 * 60 * 1000), // 8 minutes ago
-  nextScan: new Date(Date.now() + 7 * 60 * 1000), // 7 minutes from now
-  isScanning: false,
-};
+interface SignalWithMetrics extends Signal {
+  pair_metrics: PairMetrics | null;
+}
 
 function formatTimeAgo(date: Date): string {
   const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
@@ -110,6 +52,54 @@ function formatTimeUntil(date: Date): string {
 
 export default function Dashboard() {
   const { profile } = useAuth();
+  const [signals, setSignals] = useState<SignalWithMetrics[]>([]);
+  const [scanConfig, setScanConfig] = useState<GlobalScanConfig | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const [signalsRes, configRes] = await Promise.all([
+        supabase
+          .from('signals')
+          .select('*, pair_metrics(*)')
+          .gte('expires_at', new Date().toISOString())
+          .order('z_ou_score', { ascending: false }),
+        supabase
+          .from('global_scan_config')
+          .select('*')
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (signalsRes.error) throw signalsRes.error;
+      setSignals(signalsRes.data || []);
+      
+      if (!configRes.error && configRes.data) {
+        setScanConfig(configRes.data);
+      }
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('Error fetching data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const longSignals = signals.filter(s => 
+    s.signal_direction?.toLowerCase() === 'long_a_short_b' || 
+    s.signal_direction?.toLowerCase() === 'long'
+  );
+  const shortSignals = signals.filter(s => 
+    s.signal_direction?.toLowerCase() === 'short_a_long_b' || 
+    s.signal_direction?.toLowerCase() === 'short'
+  );
+  const avgConfidence = signals.length > 0
+    ? signals.reduce((a, b) => a + Number(b.confidence_score || 0), 0) / signals.length
+    : 0;
 
   return (
     <AppLayout>
@@ -129,20 +119,28 @@ export default function Dashboard() {
               <div className="flex items-center gap-2">
                 <div className={cn(
                   "h-2 w-2 rounded-full",
-                  mockScanStatus.isScanning ? "bg-warning animate-pulse" : "bg-success"
+                  scanConfig?.is_scanning ? "bg-warning animate-pulse" : "bg-success"
                 )} />
                 <span className="text-sm font-medium">
-                  {mockScanStatus.isScanning ? 'Scanning...' : 'Idle'}
+                  {scanConfig?.is_scanning ? 'Scanning...' : 'Idle'}
                 </span>
               </div>
               <div className="h-4 w-px bg-border" />
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Clock className="h-3.5 w-3.5" />
-                <span>Last: {formatTimeAgo(mockScanStatus.lastScan)}</span>
+                <span>
+                  Last: {scanConfig?.last_scan_at 
+                    ? formatTimeAgo(new Date(scanConfig.last_scan_at)) 
+                    : 'Never'}
+                </span>
               </div>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <RefreshCw className="h-3.5 w-3.5" />
-                <span>Next: {formatTimeUntil(mockScanStatus.nextScan)}</span>
+                <span>
+                  Next: {scanConfig?.next_scan_at 
+                    ? formatTimeUntil(new Date(scanConfig.next_scan_at)) 
+                    : '—'}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -158,7 +156,7 @@ export default function Dashboard() {
               <Activity className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{mockSignals.length}</div>
+              <div className="text-2xl font-bold">{signals.length}</div>
               <p className="text-xs text-muted-foreground">
                 Above threshold
               </p>
@@ -174,7 +172,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-long">
-                {mockSignals.filter(s => s.direction === 'long_a_short_b').length}
+                {longSignals.length}
               </div>
               <p className="text-xs text-muted-foreground">
                 Long A / Short B
@@ -191,7 +189,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-short">
-                {mockSignals.filter(s => s.direction === 'short_a_long_b').length}
+                {shortSignals.length}
               </div>
               <p className="text-xs text-muted-foreground">
                 Short A / Long B
@@ -208,7 +206,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {(mockSignals.reduce((a, b) => a + b.confidence, 0) / mockSignals.length * 100).toFixed(0)}%
+                {signals.length > 0 ? `${(avgConfidence * 100).toFixed(0)}%` : '—'}
               </div>
               <p className="text-xs text-muted-foreground">
                 Signal quality
@@ -227,113 +225,138 @@ export default function Dashboard() {
                   Current arbitrage opportunities ranked by Z-score
                 </CardDescription>
               </div>
-              <Button variant="outline" size="sm">
-                <RefreshCw className="mr-2 h-4 w-4" />
+              <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
+                <RefreshCw className={cn("mr-2 h-4 w-4", isLoading && "animate-spin")} />
                 Refresh
               </Button>
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Pair</TableHead>
-                  <TableHead className="text-right">Z-Score</TableHead>
-                  <TableHead className="text-right">USD Spread</TableHead>
-                  <TableHead className="text-right">Correlation</TableHead>
-                  <TableHead className="text-right">Half-Life</TableHead>
-                  <TableHead>Direction</TableHead>
-                  <TableHead className="text-right">Confidence</TableHead>
-                  <TableHead className="text-right">Expires</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {mockSignals.map((signal) => (
-                  <TableRow key={signal.id} className="trading-row">
-                    <TableCell>
-                      <div className="font-medium font-mono">
-                        {signal.symbolA} / {signal.symbolB}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className={cn(
-                        "font-mono font-medium",
-                        signal.zScore > 0 ? "text-long" : "text-short"
-                      )}>
-                        {signal.zScore > 0 ? '+' : ''}{signal.zScore.toFixed(2)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className={cn(
-                        "font-mono",
-                        signal.usdSpread > 0 ? "text-long" : "text-short"
-                      )}>
-                        ${Math.abs(signal.usdSpread).toFixed(2)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {signal.correlation.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {signal.halfLife}h
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          signal.direction === 'long_a_short_b'
-                            ? 'border-long/50 text-long bg-long/10'
-                            : 'border-short/50 text-short bg-short/10'
-                        )}
-                      >
-                        {signal.direction === 'long_a_short_b' ? (
-                          <TrendingUp className="mr-1 h-3 w-3" />
-                        ) : (
-                          <TrendingDown className="mr-1 h-3 w-3" />
-                        )}
-                        {signal.direction === 'long_a_short_b' ? 'Long A' : 'Short A'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
-                          <div
-                            className={cn(
-                              "h-full rounded-full transition-all",
-                              signal.confidence >= 0.8
-                                ? "bg-long"
-                                : signal.confidence >= 0.6
-                                ? "bg-warning"
-                                : "bg-muted-foreground"
-                            )}
-                            style={{ width: `${signal.confidence * 100}%` }}
-                          />
-                        </div>
-                        <span className="font-mono text-sm w-10">
-                          {(signal.confidence * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className={cn(
-                        "font-mono text-sm",
-                        signal.expiresIn <= 5 && "text-warning"
-                      )}>
-                        {signal.expiresIn}m
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <Link to={`/signal/${signal.id}`}>
-                        <Button variant="ghost" size="sm">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </Link>
-                    </TableCell>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : signals.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="font-medium">No active signals</p>
+                <p className="text-sm">
+                  Signals will appear here when the scanner detects trading opportunities.
+                </p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Pair</TableHead>
+                    <TableHead className="text-right">Z-Score</TableHead>
+                    <TableHead className="text-right">USD Spread</TableHead>
+                    <TableHead className="text-right">Correlation</TableHead>
+                    <TableHead className="text-right">Half-Life</TableHead>
+                    <TableHead>Direction</TableHead>
+                    <TableHead className="text-right">Confidence</TableHead>
+                    <TableHead className="text-right">Expires</TableHead>
+                    <TableHead></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {signals.map((signal) => {
+                    const zScore = Number(signal.z_ou_score);
+                    const usdSpread = Number(signal.usd_spread || 0);
+                    const correlation = Number(signal.pair_metrics?.correlation || 0);
+                    const halfLife = Number(signal.pair_metrics?.half_life_hours || 0);
+                    const confidence = Number(signal.confidence_score || 0);
+                    const expiresIn = Math.max(0, Math.ceil((new Date(signal.expires_at).getTime() - Date.now()) / 60000));
+                    const isLong = signal.signal_direction?.toLowerCase() === 'long_a_short_b' || 
+                                   signal.signal_direction?.toLowerCase() === 'long';
+                    
+                    return (
+                      <TableRow key={signal.id} className="trading-row">
+                        <TableCell>
+                          <div className="font-medium font-mono">
+                            {signal.pair_metrics?.symbol_a || '—'} / {signal.pair_metrics?.symbol_b || '—'}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className={cn(
+                            "font-mono font-medium",
+                            zScore > 0 ? "text-long" : "text-short"
+                          )}>
+                            {zScore > 0 ? '+' : ''}{zScore.toFixed(2)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className={cn(
+                            "font-mono",
+                            usdSpread > 0 ? "text-long" : "text-short"
+                          )}>
+                            ${Math.abs(usdSpread).toFixed(2)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {correlation.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {halfLife.toFixed(1)}h
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              isLong
+                                ? 'border-long/50 text-long bg-long/10'
+                                : 'border-short/50 text-short bg-short/10'
+                            )}
+                          >
+                            {isLong ? (
+                              <TrendingUp className="mr-1 h-3 w-3" />
+                            ) : (
+                              <TrendingDown className="mr-1 h-3 w-3" />
+                            )}
+                            {isLong ? 'Long A' : 'Short A'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full transition-all",
+                                  confidence >= 0.8
+                                    ? "bg-long"
+                                    : confidence >= 0.6
+                                    ? "bg-warning"
+                                    : "bg-muted-foreground"
+                                )}
+                                style={{ width: `${confidence * 100}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-sm w-10">
+                              {(confidence * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className={cn(
+                            "font-mono text-sm",
+                            expiresIn <= 5 && "text-warning"
+                          )}>
+                            {expiresIn}m
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Link to={`/signal/${signal.id}`}>
+                            <Button variant="ghost" size="sm">
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </Link>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>

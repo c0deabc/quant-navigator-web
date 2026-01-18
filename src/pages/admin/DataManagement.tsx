@@ -29,9 +29,7 @@ interface SignalWithPair extends Signal {
 function directionLabel(signalDirection: string | null | undefined): { label: string; variantClass: string; isLong: boolean } {
   const dir = (signalDirection ?? '').toLowerCase();
 
-  // Support both formats:
-  // - lovable mock: long_a_short_b / short_a_long_b
-  // - python simple: LONG / SHORT
+  // Support formats from Python scanner: LONG / SHORT / long_a_short_b / short_a_long_b
   const isLongA =
     dir === 'long' ||
     dir === 'buy' ||
@@ -49,7 +47,6 @@ function directionLabel(signalDirection: string | null | undefined): { label: st
     return { label: 'Short A', variantClass: 'text-short border-short/50', isLong: false };
   }
 
-  // Unknown / legacy
   return { label: signalDirection ?? '—', variantClass: 'text-muted-foreground border-muted/50', isLong: false };
 }
 
