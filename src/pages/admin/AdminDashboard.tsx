@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -30,53 +30,21 @@ import {
   Clock,
   Shield,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+import { logAuditEvent } from '@/lib/audit';
+import type { Database as DB } from '@/integrations/supabase/types';
 
-// Mock pending users
-const mockPendingUsers = [
-  {
-    id: '1',
-    email: 'trader1@example.com',
-    displayName: 'Trader One',
-    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-  },
-  {
-    id: '2',
-    email: 'analyst@crypto.io',
-    displayName: 'Crypto Analyst',
-    createdAt: new Date(Date.now() - 8 * 60 * 60 * 1000),
-  },
-];
+type Profile = DB['public']['Tables']['profiles']['Row'];
+type UserRole = DB['public']['Tables']['user_roles']['Row'];
+type GlobalScanConfig = DB['public']['Tables']['global_scan_config']['Row'];
 
-// Mock all users
-const mockAllUsers = [
-  {
-    id: '3',
-    email: 'admin@statarb.com',
-    displayName: 'Admin User',
-    status: 'active',
-    role: 'admin',
-    createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-  },
-  {
-    id: '4',
-    email: 'protrader@gmail.com',
-    displayName: 'Pro Trader',
-    status: 'active',
-    role: 'user',
-    createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
-  },
-  {
-    id: '5',
-    email: 'suspended@example.com',
-    displayName: 'Suspended User',
-    status: 'disabled',
-    role: 'user',
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-  },
-];
+interface ProfileWithRole extends Profile {
+  role: string;
+}
 
 const statusColors = {
   active: 'bg-success/10 text-success border-success/50',
@@ -84,17 +52,102 @@ const statusColors = {
   disabled: 'bg-destructive/10 text-destructive border-destructive/50',
 };
 
-export default function AdminDashboard() {
-  const [pendingUsers, setPendingUsers] = useState(mockPendingUsers);
+function formatTimeAgo(date: Date): string {
+  const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes === 1) return '1m ago';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return '1h ago';
+  return `${hours}h ago`;
+}
 
-  const handleApprove = (userId: string) => {
-    setPendingUsers(users => users.filter(u => u.id !== userId));
-    toast.success('User approved successfully');
+export default function AdminDashboard() {
+  const [profiles, setProfiles] = useState<ProfileWithRole[]>([]);
+  const [scanConfig, setScanConfig] = useState<GlobalScanConfig | null>(null);
+  const [signalCount, setSignalCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const [profilesRes, rolesRes, configRes, signalsRes] = await Promise.all([
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('user_roles').select('*'),
+        supabase.from('global_scan_config').select('*').limit(1).maybeSingle(),
+        supabase.from('signals').select('id', { count: 'exact', head: true }).gte('expires_at', new Date().toISOString()),
+      ]);
+
+      if (!profilesRes.error && profilesRes.data) {
+        const roles = rolesRes.data || [];
+        const profilesWithRoles: ProfileWithRole[] = profilesRes.data.map(p => {
+          const userRole = roles.find(r => r.user_id === p.user_id);
+          return { ...p, role: userRole?.role || 'user' };
+        });
+        setProfiles(profilesWithRoles);
+      }
+      if (!configRes.error && configRes.data) setScanConfig(configRes.data);
+      if (!signalsRes.error) setSignalCount(signalsRes.count || 0);
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('Error fetching data:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleReject = (userId: string) => {
-    setPendingUsers(users => users.filter(u => u.id !== userId));
-    toast.success('User rejected');
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const pendingProfiles = profiles.filter(p => p.status === 'pending');
+  const activeProfiles = profiles.filter(p => p.status === 'active');
+
+  const handleApprove = async (profile: ProfileWithRole) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ status: 'active' })
+        .eq('id', profile.id);
+
+      if (error) throw error;
+
+      await logAuditEvent({
+        action: 'user_approved',
+        entityType: 'profile',
+        entityId: profile.id,
+        details: { email: profile.email },
+      });
+
+      toast.success('User approved successfully');
+      fetchData();
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('Error approving user:', error);
+      toast.error('Failed to approve user');
+    }
+  };
+
+  const handleReject = async (profile: ProfileWithRole) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ status: 'disabled' })
+        .eq('id', profile.id);
+
+      if (error) throw error;
+
+      await logAuditEvent({
+        action: 'user_rejected',
+        entityType: 'profile',
+        entityId: profile.id,
+        details: { email: profile.email },
+      });
+
+      toast.success('User rejected');
+      fetchData();
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('Error rejecting user:', error);
+      toast.error('Failed to reject user');
+    }
   };
 
   return (
@@ -117,7 +170,7 @@ export default function AdminDashboard() {
               <Clock className="h-4 w-4 text-warning" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{pendingUsers.length}</div>
+              <div className="text-2xl font-bold">{pendingProfiles.length}</div>
               <p className="text-xs text-muted-foreground">
                 Waiting for review
               </p>
@@ -132,9 +185,7 @@ export default function AdminDashboard() {
               <Users className="h-4 w-4 text-success" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {mockAllUsers.filter(u => u.status === 'active').length}
-              </div>
+              <div className="text-2xl font-bold">{activeProfiles.length}</div>
               <p className="text-xs text-muted-foreground">
                 Currently active
               </p>
@@ -149,7 +200,7 @@ export default function AdminDashboard() {
               <Activity className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">5</div>
+              <div className="text-2xl font-bold">{signalCount}</div>
               <p className="text-xs text-muted-foreground">
                 Above threshold
               </p>
@@ -164,9 +215,15 @@ export default function AdminDashboard() {
               <RefreshCw className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">8m ago</div>
+              <div className="text-2xl font-bold">
+                {scanConfig?.last_scan_at 
+                  ? formatTimeAgo(new Date(scanConfig.last_scan_at))
+                  : 'Never'}
+              </div>
               <p className="text-xs text-muted-foreground">
-                Next in 7 minutes
+                {scanConfig?.next_scan_at 
+                  ? `Next in ${Math.max(0, Math.ceil((new Date(scanConfig.next_scan_at).getTime() - Date.now()) / 60000))} minutes`
+                  : 'Not scheduled'}
               </p>
             </CardContent>
           </Card>
@@ -218,7 +275,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Pending Approvals */}
-        {pendingUsers.length > 0 && (
+        {pendingProfiles.length > 0 && (
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -248,16 +305,16 @@ export default function AdminDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pendingUsers.map((user) => (
-                    <TableRow key={user.id}>
+                  {pendingProfiles.slice(0, 5).map((profile) => (
+                    <TableRow key={profile.id}>
                       <TableCell>
                         <div>
-                          <p className="font-medium">{user.displayName}</p>
-                          <p className="text-sm text-muted-foreground">{user.email}</p>
+                          <p className="font-medium">{profile.display_name || 'No name'}</p>
+                          <p className="text-sm text-muted-foreground">{profile.email}</p>
                         </div>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {user.createdAt.toLocaleDateString()}
+                        {new Date(profile.created_at).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
@@ -265,7 +322,7 @@ export default function AdminDashboard() {
                             size="sm"
                             variant="outline"
                             className="text-success border-success/50 hover:bg-success/10"
-                            onClick={() => handleApprove(user.id)}
+                            onClick={() => handleApprove(profile)}
                           >
                             <CheckCircle className="mr-1 h-4 w-4" />
                             Approve
@@ -274,7 +331,7 @@ export default function AdminDashboard() {
                             size="sm"
                             variant="outline"
                             className="text-destructive border-destructive/50 hover:bg-destructive/10"
-                            onClick={() => handleReject(user.id)}
+                            onClick={() => handleReject(profile)}
                           >
                             <XCircle className="mr-1 h-4 w-4" />
                             Reject
@@ -299,78 +356,98 @@ export default function AdminDashboard() {
                   Overview of all registered users
                 </CardDescription>
               </div>
-              <Link to="/admin/users">
-                <Button variant="outline" size="sm">
-                  Manage Users
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
+                  <RefreshCw className={cn("mr-2 h-4 w-4", isLoading && "animate-spin")} />
+                  Refresh
                 </Button>
-              </Link>
+                <Link to="/admin/users">
+                  <Button variant="outline" size="sm">
+                    Manage Users
+                  </Button>
+                </Link>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Joined</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {mockAllUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{user.displayName}</p>
-                        <p className="text-sm text-muted-foreground">{user.email}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          user.role === 'admin'
-                            ? 'border-primary/50 text-primary bg-primary/10'
-                            : ''
-                        )}
-                      >
-                        {user.role === 'admin' && <Shield className="mr-1 h-3 w-3" />}
-                        {user.role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={statusColors[user.status as keyof typeof statusColors]}
-                      >
-                        {user.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {user.createdAt.toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem>View Details</DropdownMenuItem>
-                          <DropdownMenuItem>Edit Role</DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive">
-                            Disable Account
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : profiles.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No users found</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Joined</TableHead>
+                    <TableHead></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {profiles.slice(0, 10).map((profile) => {
+                    const role = profile.role;
+                    return (
+                      <TableRow key={profile.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{profile.display_name || 'No name'}</p>
+                            <p className="text-sm text-muted-foreground">{profile.email}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              role === 'admin'
+                                ? 'border-primary/50 text-primary bg-primary/10'
+                                : ''
+                            )}
+                          >
+                            {role === 'admin' && <Shield className="mr-1 h-3 w-3" />}
+                            {role}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={statusColors[profile.status as keyof typeof statusColors]}
+                          >
+                            {profile.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {new Date(profile.created_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem>View Details</DropdownMenuItem>
+                              <DropdownMenuItem>Edit Role</DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="text-destructive">
+                                Disable Account
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>
