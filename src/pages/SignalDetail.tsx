@@ -230,7 +230,7 @@ const SignalDetail = () => {
 
   // ---- TradingView symbols ----
   const exchange = 'BYBIT'; // Change here if you want OKX/BINANCE, etc.
-  const tvInterval = timeframeToTradingViewInterval(signal?.timeframe);
+  const tvInterval = '15';
 
   const tvSymbolA = useMemo(() => buildTvSymbol(signal?.symbol_a || '', exchange), [signal?.symbol_a]);
   const tvSymbolB = useMemo(() => buildTvSymbol(signal?.symbol_b || '', exchange), [signal?.symbol_b]);
