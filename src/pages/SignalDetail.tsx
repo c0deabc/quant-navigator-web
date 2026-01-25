@@ -30,23 +30,10 @@ interface SignalWithMetrics extends Signal {
 }
 
 // --- TradingView widget helpers ---
-function timeframeToTradingViewInterval(tf?: string | null): string {
-  const t = (tf || '').toLowerCase().trim();
-  // Common: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d
-  if (!t) return '15';
-  if (t.endsWith('m')) return t.replace('m', '');
-  if (t.endsWith('h')) return String(Number(t.replace('h', '')) * 60);
-  if (t.endsWith('d')) return 'D';
-  if (t === 'd') return 'D';
-  return '15';
-}
-
 function buildTvSymbol(symbol: string, exchange?: string): string {
   const s = symbol.trim();
   if (!s) return s;
-  // If already has EXCHANGE:SYMBOL, keep as is
   if (s.includes(':')) return s;
-  // Default exchange: BYBIT (works for perp symbols like XRPUSDT.P)
   const ex = (exchange || 'BYBIT').trim();
   return `${ex}:${s}`;
 }
@@ -66,7 +53,6 @@ function TradingViewWidget(props: {
   const { title, symbol, interval, height = 520 } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Give each widget its own unique container id
   const containerId = useMemo(() => {
     const rand = Math.random().toString(36).slice(2);
     return `tv_${rand}`;
@@ -76,7 +62,6 @@ function TradingViewWidget(props: {
     const el = containerRef.current;
     if (!el) return;
 
-    // Clear previous widget (important on fast refresh / route changes)
     el.innerHTML = '';
 
     const script = document.createElement('script');
@@ -88,10 +73,6 @@ function TradingViewWidget(props: {
       const TV = window.TradingView;
       if (!TV) return;
 
-      // Create widget
-      // Docs: https://www.tradingview.com/widget/advanced-chart/
-      // Note: Custom/private indicators cannot be injected via this widget.
-      // We use it to get candlesticks + the same "feel" as TradingView.
       // eslint-disable-next-line no-new
       new TV.widget({
         autosize: true,
@@ -99,7 +80,7 @@ function TradingViewWidget(props: {
         interval,
         timezone: 'Etc/UTC',
         theme: 'dark',
-        style: '1', // 1 = candles
+        style: '1',
         locale: 'en',
         toolbar_bg: '#0b1220',
         enable_publishing: false,
@@ -117,7 +98,6 @@ function TradingViewWidget(props: {
     el.appendChild(script);
 
     return () => {
-      // Cleanup
       if (el) el.innerHTML = '';
     };
   }, [containerId, symbol, interval]);
@@ -142,10 +122,7 @@ function TradingViewWidget(props: {
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
-        <div
-          className="w-full rounded-md border bg-background"
-          style={{ height }}
-        >
+        <div className="w-full rounded-md border bg-background" style={{ height }}>
           <div id={containerId} ref={containerRef} className="w-full h-full" />
         </div>
       </CardContent>
@@ -193,7 +170,6 @@ const SignalDetail = () => {
   const getSignalDirection = () => {
     if (!signal) return { direction: 'Unknown', type: 'neutral' };
 
-    // Prefer explicit signal_direction if present
     const dir = signal.signal_direction as string | null;
 
     if (dir) {
@@ -229,7 +205,7 @@ const SignalDetail = () => {
   };
 
   // ---- TradingView symbols ----
-  const exchange = 'BYBIT'; // Change here if you want OKX/BINANCE, etc.
+  const exchange = 'BYBIT';
   const tvInterval = '15';
 
   const tvSymbolA = useMemo(() => buildTvSymbol(symbolA, exchange), [symbolA]);
@@ -266,7 +242,7 @@ const SignalDetail = () => {
             </CardHeader>
             <CardContent>
               <Button asChild className="w-full">
-                <Link to="/dashboard">
+                <Link to="/">
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   Back to Dashboard
                 </Link>
@@ -285,7 +261,7 @@ const SignalDetail = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button variant="outline" size="sm" asChild>
-              <Link to="/dashboard">
+              <Link to="/">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back
               </Link>
@@ -293,7 +269,7 @@ const SignalDetail = () => {
 
             <div>
               <h1 className="text-2xl font-bold">
-                {signal.symbol_a} / {signal.symbol_b}
+                {symbolA} / {symbolB}
               </h1>
               <p className="text-muted-foreground">
                 Signal analysis and metrics
@@ -327,7 +303,7 @@ const SignalDetail = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {(signal as any).z_ou_score?.toFixed?.(2) ?? signal.z_score?.toFixed?.(2) ?? 'N/A'}
+                {signal.z_ou_score?.toFixed?.(2) ?? 'N/A'}
               </div>
             </CardContent>
           </Card>
@@ -369,7 +345,7 @@ const SignalDetail = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {signal.pair_metrics?.coint_p_val?.toFixed(4) ?? 'N/A'}
+                {signal.pair_metrics?.cointegration_pvalue?.toFixed(4) ?? 'N/A'}
               </div>
             </CardContent>
           </Card>
@@ -391,7 +367,7 @@ const SignalDetail = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {signal.pair_metrics?.half_life ? `${signal.pair_metrics.half_life.toFixed(1)}h` : 'N/A'}
+                {signal.pair_metrics?.half_life_hours ? `${signal.pair_metrics.half_life_hours.toFixed(1)}h` : 'N/A'}
               </div>
             </CardContent>
           </Card>
@@ -420,7 +396,7 @@ const SignalDetail = () => {
                 <span className="text-sm font-medium">Generated</span>
               </div>
               <span className="text-sm">
-                {signal.signal_ts ? new Date(signal.signal_ts).toLocaleString() : 'N/A'}
+                {signal.created_at ? new Date(signal.created_at).toLocaleString() : 'N/A'}
               </span>
             </div>
 
@@ -459,7 +435,7 @@ const SignalDetail = () => {
               ) : (
                 <>
                   <TradingViewWidget
-                    title={`Synthetic Ratio: ${signal.symbol_a}/${signal.symbol_b}`}
+                    title={`Synthetic Ratio: ${symbolA}/${symbolB}`}
                     symbol={tvRatio}
                     interval={tvInterval}
                     height={560}
@@ -467,13 +443,13 @@ const SignalDetail = () => {
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <TradingViewWidget
-                      title={`Leg A: ${signal.symbol_a}`}
+                      title={`Leg A: ${symbolA}`}
                       symbol={tvSymbolA}
                       interval={tvInterval}
                       height={520}
                     />
                     <TradingViewWidget
-                      title={`Leg B: ${signal.symbol_b}`}
+                      title={`Leg B: ${symbolB}`}
                       symbol={tvSymbolB}
                       interval={tvInterval}
                       height={520}
@@ -481,8 +457,8 @@ const SignalDetail = () => {
                   </div>
 
                   <div className="text-xs text-muted-foreground">
-                    Note: TradingView widget does not allow injecting private/custom indicators (like your “Z-score + RSI Combined Arrows”).
-                    If you want the exact overlay arrows/lines inside the web app, we’ll implement it in the frontend and draw it ourselves.
+                    Note: TradingView widget does not allow injecting private/custom indicators.
+                    For custom overlays, we can implement frontend-drawn charts.
                   </div>
                 </>
               )}

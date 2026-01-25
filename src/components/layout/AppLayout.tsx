@@ -22,6 +22,7 @@ import {
   Sun,
   History,
   User,
+  DollarSign,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -31,6 +32,7 @@ interface AppLayoutProps {
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/funding', label: 'Funding', icon: DollarSign },
   { path: '/history', label: 'History', icon: History },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
