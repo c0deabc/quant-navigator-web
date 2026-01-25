@@ -139,6 +139,60 @@ export type Database = {
           },
         ]
       }
+      funding_series: {
+        Row: {
+          exchange: string
+          funding_rate: number
+          id: string
+          symbol: string
+          ts: string
+        }
+        Insert: {
+          exchange: string
+          funding_rate: number
+          id?: string
+          symbol: string
+          ts: string
+        }
+        Update: {
+          exchange?: string
+          funding_rate?: number
+          id?: string
+          symbol?: string
+          ts?: string
+        }
+        Relationships: []
+      }
+      funding_snapshot: {
+        Row: {
+          exchange: string
+          funding_rate: number
+          id: string
+          next_funding_time: string | null
+          quote: string | null
+          symbol: string
+          updated_at: string
+        }
+        Insert: {
+          exchange: string
+          funding_rate: number
+          id?: string
+          next_funding_time?: string | null
+          quote?: string | null
+          symbol: string
+          updated_at?: string
+        }
+        Update: {
+          exchange?: string
+          funding_rate?: number
+          id?: string
+          next_funding_time?: string | null
+          quote?: string | null
+          symbol?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       global_scan_config: {
         Row: {
           cointegration_pvalue_limit: number | null
