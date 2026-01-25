@@ -194,7 +194,7 @@ const SignalDetail = () => {
     if (!signal) return { direction: 'Unknown', type: 'neutral' };
 
     // Prefer explicit signal_direction if present
-    const dir = (signal as any).signal_direction as string | null;
+    const dir = signal.signal_direction as string | null;
 
     if (dir) {
       if (dir.toLowerCase().includes('long')) return { direction: dir, type: 'long' };
@@ -202,14 +202,14 @@ const SignalDetail = () => {
       return { direction: dir, type: 'neutral' };
     }
 
-    // Fallback to signal_type
-    if (signal.signal_type?.includes('long')) return { direction: 'Long A / Short B', type: 'long' };
-    if (signal.signal_type?.includes('short')) return { direction: 'Short A / Long B', type: 'short' };
-
-    return { direction: signal.signal_type || 'Unknown', type: 'neutral' };
+    return { direction: 'Unknown', type: 'neutral' };
   };
 
   const directionInfo = getSignalDirection();
+
+  // Get symbols from pair_metrics
+  const symbolA = signal?.pair_metrics?.symbol_a || '';
+  const symbolB = signal?.pair_metrics?.symbol_b || '';
 
   const formatTimeUntilExpiry = (expiresAt: string | null) => {
     if (!expiresAt) return 'N/A';
@@ -232,14 +232,12 @@ const SignalDetail = () => {
   const exchange = 'BYBIT'; // Change here if you want OKX/BINANCE, etc.
   const tvInterval = '15';
 
-  const tvSymbolA = useMemo(() => buildTvSymbol(signal?.symbol_a || '', exchange), [signal?.symbol_a]);
-  const tvSymbolB = useMemo(() => buildTvSymbol(signal?.symbol_b || '', exchange), [signal?.symbol_b]);
+  const tvSymbolA = useMemo(() => buildTvSymbol(symbolA, exchange), [symbolA]);
+  const tvSymbolB = useMemo(() => buildTvSymbol(symbolB, exchange), [symbolB]);
   const tvRatio = useMemo(() => {
-    const a = signal?.symbol_a || '';
-    const b = signal?.symbol_b || '';
-    if (!a || !b) return '';
-    return buildRatioSymbol(a, b, exchange);
-  }, [signal?.symbol_a, signal?.symbol_b]);
+    if (!symbolA || !symbolB) return '';
+    return buildRatioSymbol(symbolA, symbolB, exchange);
+  }, [symbolA, symbolB]);
 
   if (loading) {
     return (
