@@ -211,9 +211,6 @@ export default function FundingMonitor() {
                 <span className="ml-2 text-sm font-normal text-muted-foreground">({totalCount} found)</span>
               )}
             </CardTitle>
-            <CardDescription>
-              Таблица читает <span className="font-mono">public.funding_anomalies</span>
-            </CardDescription>
           </CardHeader>
 
           <CardContent>
