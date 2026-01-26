@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,78 +6,130 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Loader2, AlertCircle, DollarSign, TrendingUp, TrendingDown } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { FundingSnapshot, SUPPORTED_EXCHANGES, FundingStats } from '@/types/funding';
 import { cn } from '@/lib/utils';
 
-function formatRate(rate: number | null): string {
-  if (rate === null) return '—';
-  return `${rate >= 0 ? '+' : ''}${rate.toFixed(3)}%`;
+type CrossRow = {
+  exchange: string;
+  funding_pct?: number | null;
+  funding_rate?: number | null;
+  next?: string | null;
+};
+
+type FundingAnomalyRow = {
+  id: string;
+  created_at: string | null;
+  symbol: string;
+  trigger_exchange: string;
+  trigger_funding: number;
+  next_funding_ts: string;
+  pre_window_min?: number | null;
+  threshold?: number | null;
+  spread_max_min?: number | null;
+  cross_data?: CrossRow[] | any;
+  status?: string | null;
+};
+
+function formatUtc(ts: string | null | undefined): string {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return (
+    d.toLocaleString('en-US', {
+      timeZone: 'UTC',
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }) + ' UTC'
+  );
 }
 
-function formatTime(time: string | null): string {
-  if (!time) return '—';
-  const date = new Date(time);
-  return date.toLocaleString('en-US', {
-    timeZone: 'UTC',
-    hour: '2-digit',
-    minute: '2-digit',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }) + ' UTC';
+function asPercentNumber(v: number | null | undefined): number | null {
+  if (v === null || v === undefined || Number.isNaN(v)) return null;
+  // эвристика: доля обычно <= 0.2, процент чаще > 0.2
+  return Math.abs(v) <= 0.2 ? v * 100 : v;
+}
+
+function asPercentDisplay(v: number | null | undefined): string {
+  const pct = asPercentNumber(v);
+  if (pct === null) return '—';
+  const sign = pct >= 0 ? '+' : '';
+  return `${sign}${pct.toFixed(3)}%`;
 }
 
 export default function FundingSymbolDetail() {
   const { symbol } = useParams<{ symbol: string }>();
-  const [snapshots, setSnapshots] = useState<FundingSnapshot[]>([]);
+  const [row, setRow] = useState<FundingAnomalyRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchLatest = async () => {
       if (!symbol) return;
 
       try {
         setLoading(true);
         setError(null);
 
+        // Берём самую свежую аномалию по символу
         const { data, error: fetchError } = await supabase
-          .from('funding_snapshot')
+          .from('funding_anomalies')
           .select('*')
           .eq('symbol', symbol)
-          .in('exchange', SUPPORTED_EXCHANGES as unknown as string[]);
+          .order('created_at', { ascending: false })
+          .limit(1);
 
         if (fetchError) throw fetchError;
 
-        setSnapshots((data || []) as FundingSnapshot[]);
-      } catch (err) {
-        console.error('Error fetching funding data:', err);
-        setError('Failed to load funding data');
+        const latest = (data && data[0]) ? (data[0] as FundingAnomalyRow) : null;
+        setRow(latest);
+      } catch (err: any) {
+        console.error('Error fetching funding anomaly:', err);
+        setError(err?.message || 'Failed to load funding anomaly');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchData();
+    fetchLatest();
   }, [symbol]);
 
-  // Compute stats
-  const stats: FundingStats | null = (() => {
-    const validSnapshots = snapshots.filter((s) => s.funding_rate !== null);
-    if (validSnapshots.length === 0) return null;
+  const crossRows: CrossRow[] = useMemo(() => {
+    if (!row) return [];
+    const cd: any = row.cross_data;
 
-    const rates = validSnapshots.map((s) => ({ exchange: s.exchange, rate: s.funding_rate }));
-    const maxEntry = rates.reduce((a, b) => (a.rate > b.rate ? a : b));
-    const minEntry = rates.reduce((a, b) => (a.rate < b.rate ? a : b));
+    if (Array.isArray(cd)) return cd as CrossRow[];
+    // если вдруг прилетело объектом — попробуем привести
+    if (cd && typeof cd === 'object') {
+      return Object.keys(cd).map((k) => ({
+        exchange: k,
+        ...(cd[k] || {}),
+      }));
+    }
+    return [];
+  }, [row]);
 
+  const stats = useMemo(() => {
+    const valid = crossRows
+      .map((r) => {
+        const v = (r.funding_rate ?? r.funding_pct) as number | null | undefined;
+        const pct = asPercentNumber(v);
+        return pct === null ? null : { exchange: r.exchange, pct };
+      })
+      .filter(Boolean) as { exchange: string; pct: number }[];
+
+    if (valid.length === 0) return null;
+
+    const max = valid.reduce((a, b) => (a.pct > b.pct ? a : b));
+    const min = valid.reduce((a, b) => (a.pct < b.pct ? a : b));
     return {
-      spread: maxEntry.rate - minEntry.rate,
-      maxRate: maxEntry.rate,
-      minRate: minEntry.rate,
-      bestLongExchange: minEntry.exchange,
-      bestShortExchange: maxEntry.exchange,
+      spread: max.pct - min.pct,
+      maxRate: max.pct,
+      minRate: min.pct,
+      bestLongExchange: min.exchange,
+      bestShortExchange: max.exchange,
     };
-  })();
+  }, [crossRows]);
 
   if (loading) {
     return (
@@ -85,7 +137,7 @@ export default function FundingSymbolDetail() {
         <div className="flex items-center justify-center min-h-[60vh]">
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
-            <p className="text-muted-foreground">Loading funding data...</p>
+            <p className="text-muted-foreground">Loading funding anomaly...</p>
           </div>
         </div>
       </AppLayout>
@@ -118,6 +170,34 @@ export default function FundingSymbolDetail() {
     );
   }
 
+  if (!row) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5" />
+                No data
+              </CardTitle>
+              <CardDescription>Нет аномалий для {symbol}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild className="w-full">
+                <Link to="/funding">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Funding Monitor
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const triggerFundingPct = asPercentNumber(row.trigger_funding);
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -133,98 +213,98 @@ export default function FundingSymbolDetail() {
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <DollarSign className="h-6 w-6 text-primary" />
-              {symbol}
+              {row.symbol}
             </h1>
             <p className="text-muted-foreground">
-              Cross-exchange funding rate comparison
+              Latest anomaly from <span className="font-mono">{row.trigger_exchange}</span> • Next funding: {formatUtc(row.next_funding_ts)}
             </p>
           </div>
         </div>
 
-        {/* Stats Summary */}
-        {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Spread</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold font-mono">
-                  {formatRate(stats.spread)}
-                </div>
-              </CardContent>
-            </Card>
+        {/* Summary cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Trigger</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Badge variant="outline" className="uppercase">
+                {row.trigger_exchange}
+              </Badge>
+              <div className={cn('text-2xl font-bold font-mono', (triggerFundingPct ?? 0) >= 0 ? 'text-green-500' : 'text-red-500')}>
+                {triggerFundingPct === null ? '—' : `${triggerFundingPct >= 0 ? '+' : ''}${triggerFundingPct.toFixed(3)}%`}
+              </div>
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Max Rate</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold font-mono text-green-500">
-                  {formatRate(stats.maxRate)}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {stats.bestShortExchange.toUpperCase()}
-                </p>
-              </CardContent>
-            </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Spread (max-min)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold font-mono">
+                {asPercentDisplay(row.spread_max_min ?? null)}
+              </div>
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Min Rate</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold font-mono text-red-500">
-                  {formatRate(stats.minRate)}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {stats.bestLongExchange.toUpperCase()}
-                </p>
-              </CardContent>
-            </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Best For</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {stats ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="h-4 w-4 text-green-500" />
+                    <span className="text-sm">Long:</span>
+                    <Badge variant="outline">{stats.bestLongExchange.toUpperCase()}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <TrendingDown className="h-4 w-4 text-red-500" />
+                    <span className="text-sm">Short:</span>
+                    <Badge variant="outline">{stats.bestShortExchange.toUpperCase()}</Badge>
+                  </div>
+                </>
+              ) : (
+                <p className="text-muted-foreground text-sm">No cross-exchange rates</p>
+              )}
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Best For</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-green-500" />
-                  <span className="text-sm">Long:</span>
-                  <Badge variant="outline">{stats.bestLongExchange.toUpperCase()}</Badge>
-                </div>
-                <div className="flex items-center gap-2">
-                  <TrendingDown className="h-4 w-4 text-red-500" />
-                  <span className="text-sm">Short:</span>
-                  <Badge variant="outline">{stats.bestShortExchange.toUpperCase()}</Badge>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Created</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm font-mono">{formatUtc(row.created_at)}</div>
+            </CardContent>
+          </Card>
+        </div>
 
-        {/* Exchange Comparison */}
+        {/* Exchange cards from cross_data */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Funding Rates by Exchange</CardTitle>
-            <CardDescription>Current funding rates across all supported exchanges</CardDescription>
+            <CardTitle className="text-lg">Funding rates by exchange</CardTitle>
+            <CardDescription>Из поля <span className="font-mono">cross_data</span> в funding_anomalies</CardDescription>
           </CardHeader>
           <CardContent>
-            {snapshots.length === 0 ? (
+            {crossRows.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <AlertCircle className="h-8 w-8 mx-auto mb-4 opacity-50" />
-                <p>No funding data available for {symbol}</p>
+                <p>No cross-exchange data for {row.symbol}</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                {SUPPORTED_EXCHANGES.map((exchange) => {
-                  const snapshot = snapshots.find((s) => s.exchange === exchange);
-                  const isMax = stats && snapshot?.funding_rate === stats.maxRate;
-                  const isMin = stats && snapshot?.funding_rate === stats.minRate;
+                {crossRows.map((r) => {
+                  const v = (r.funding_rate ?? r.funding_pct) as number | null | undefined;
+                  const pct = asPercentNumber(v);
+                  const isMax = stats && pct !== null && pct === stats.maxRate;
+                  const isMin = stats && pct !== null && pct === stats.minRate;
 
                   return (
                     <Card
-                      key={exchange}
+                      key={r.exchange}
                       className={cn(
                         'border-2',
                         isMax && 'border-green-500 bg-green-500/5',
@@ -234,7 +314,7 @@ export default function FundingSymbolDetail() {
                     >
                       <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium uppercase flex items-center justify-between">
-                          {exchange}
+                          {r.exchange}
                           {isMax && <Badge variant="default" className="bg-green-500">Max</Badge>}
                           {isMin && <Badge variant="destructive">Min</Badge>}
                         </CardTitle>
@@ -243,23 +323,20 @@ export default function FundingSymbolDetail() {
                         <div
                           className={cn(
                             'text-3xl font-bold font-mono',
-                            !snapshot
+                            pct === null
                               ? 'text-muted-foreground'
-                              : snapshot.funding_rate >= 0
+                              : pct >= 0
                               ? 'text-green-500'
                               : 'text-red-500'
                           )}
                         >
-                          {snapshot ? formatRate(snapshot.funding_rate) : '—'}
+                          {pct === null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(3)}%`}
                         </div>
+
                         <div className="mt-3 space-y-1 text-xs text-muted-foreground">
                           <div>
                             <span className="font-medium">Next: </span>
-                            {formatTime(snapshot?.next_funding_time ?? null)}
-                          </div>
-                          <div>
-                            <span className="font-medium">Updated: </span>
-                            {formatTime(snapshot?.updated_at ?? null)}
+                            {r.next ? r.next : '—'}
                           </div>
                         </div>
                       </CardContent>
@@ -271,15 +348,15 @@ export default function FundingSymbolDetail() {
           </CardContent>
         </Card>
 
-        {/* Placeholder for future time series chart */}
+        {/* Phase 2 placeholder */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Historical Funding Rates</CardTitle>
             <CardDescription>Time series chart (Phase 2)</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
-              <p>Historical funding rate chart will be available when time series data is ingested.</p>
+            <div className="text-center py-10 text-muted-foreground">
+              Будет добавлено позже: история funding по времени.
             </div>
           </CardContent>
         </Card>
