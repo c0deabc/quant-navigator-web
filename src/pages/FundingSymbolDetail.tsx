@@ -6,83 +6,74 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-
-// NOTE: This page reads from public.funding_anomalies (not funding_snapshot).
-// Expected columns (typical):
-// id, created_at, symbol, trigger_exchange, trigger_funding, next_funding_ts,
-// pre_window_min, threshold, spread_pct, cross (jsonb), status
-
-type CrossItem = {
-  exchange?: string;
-  funding?: number | string | null;
-  next?: string | number | null;
-  next_funding_ts?: string | null;
-  next_funding_at?: string | null;
-  next_funding_time?: string | null;
-  [k: string]: unknown;
-};
 
 type FundingAnomalyRow = {
   id: string;
   created_at: string;
   symbol: string;
   trigger_exchange: string;
-  trigger_funding: number;
+  trigger_funding: number | string | null;
   next_funding_ts: string;
   pre_window_min?: number | null;
-  threshold?: number | null;
-  spread_pct?: number | null;
-  cross?: CrossItem[] | null;
+  threshold?: number | string | null;
+  spread_max_min?: number | null;
+  cross_data?: unknown;
   status?: string | null;
+};
+
+type CrossItem = {
+  exchange?: string;
+  funding?: number | string | null;
+  next?: string | null;
 };
 
 function asNumber(v: unknown): number | null {
   if (v === null || v === undefined) return null;
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  const n = Number(v);
+  const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-function formatPct(x: number | null | undefined, digits = 3): string {
-  if (x === null || x === undefined || !Number.isFinite(x)) return "—";
-  return `${(x * 100).toFixed(digits)}%`;
+function formatPct(v: number | null): string {
+  if (v === null) return "—";
+  return `${(v * 100).toFixed(3)}%`;
 }
 
-function formatDate(x: string | number | null | undefined): string {
-  if (!x) return "—";
-  const d = typeof x === "number" ? new Date(x) : new Date(x);
-  if (Number.isNaN(d.getTime())) return String(x);
+function formatDate(isoLike?: string | null): string {
+  if (!isoLike) return "—";
+  const d = new Date(isoLike);
+  if (Number.isNaN(d.getTime())) return String(isoLike);
   return d.toLocaleString(undefined, {
     year: "numeric",
     month: "short",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: undefined,
     timeZoneName: "short",
   });
 }
 
-function computeSpreadPctFromCross(cross: CrossItem[] | null | undefined): number | null {
-  if (!cross || cross.length === 0) return null;
-  const vals = cross
-    .map((c) => asNumber(c.funding))
-    .filter((v): v is number => v !== null);
-  if (vals.length < 2) return null;
-  return Math.max(...vals) - Math.min(...vals);
-}
+/**
+ * cross_data может быть:
+ * - массивом объектов [{exchange, funding, next}, ...]
+ * - объектом с полем cross_data / data / cross
+ * - вообще чем угодно (на всякий случай)
+ */
+function normalizeCrossData(input: unknown): CrossItem[] {
+  if (!input) return [];
+  if (Array.isArray(input)) return input as CrossItem[];
 
-function normalizeCrossItem(c: CrossItem): { exchange: string; funding: number | null; next: string | number | null } {
-  const exchange = String(c.exchange ?? "—").toUpperCase();
-  const funding = asNumber(c.funding);
-  const next =
-    c.next_funding_ts ??
-    c.next_funding_at ??
-    c.next_funding_time ??
-    c.next ??
-    null;
-  return { exchange, funding, next };
+  if (typeof input === "object") {
+    const obj = input as Record<string, unknown>;
+    const candidate =
+      (obj["cross_data"] as unknown) ??
+      (obj["data"] as unknown) ??
+      (obj["cross"] as unknown) ??
+      null;
+
+    if (Array.isArray(candidate)) return candidate as CrossItem[];
+  }
+
+  return [];
 }
 
 export default function FundingSymbolDetail() {
@@ -90,20 +81,25 @@ export default function FundingSymbolDetail() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [row, setRow] = useState<FundingAnomalyRow | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
-    if (!symbol) return;
+  const cross = useMemo(() => normalizeCrossData(row?.cross_data), [row?.cross_data]);
+
+  async function fetchLatest() {
+    if (!symbol) {
+      setError("Missing symbol in route params.");
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
-    // Fetch the most recent anomaly for this symbol.
     const { data, error } = await supabase
       .from("funding_anomalies")
       .select(
-        "id, created_at, symbol, trigger_exchange, trigger_funding, next_funding_ts, pre_window_min, threshold, spread_pct, cross, status"
+        "id, created_at, symbol, trigger_exchange, trigger_funding, next_funding_ts, pre_window_min, threshold, spread_max_min, cross_data, status"
       )
       .eq("symbol", symbol)
       .order("created_at", { ascending: false })
@@ -118,7 +114,7 @@ export default function FundingSymbolDetail() {
     }
 
     if (!data) {
-      setError("No anomaly found for this symbol.");
+      setError(`No funding anomaly rows found for ${symbol}`);
       setRow(null);
       setLoading(false);
       return;
@@ -126,68 +122,28 @@ export default function FundingSymbolDetail() {
 
     setRow(data as FundingAnomalyRow);
     setLoading(false);
-  };
+  }
 
   useEffect(() => {
-    load();
+    fetchLatest();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
 
-  const cross = useMemo(() => {
-    const raw = (row?.cross ?? []) as CrossItem[];
-    const normalized = raw.map(normalizeCrossItem);
-    // sort: trigger first, then by funding (desc)
-    const trig = (row?.trigger_exchange ?? "").toUpperCase();
-    normalized.sort((a, b) => {
-      const aIsTrig = a.exchange === trig;
-      const bIsTrig = b.exchange === trig;
-      if (aIsTrig && !bIsTrig) return -1;
-      if (!aIsTrig && bIsTrig) return 1;
-      const af = a.funding ?? -Infinity;
-      const bf = b.funding ?? -Infinity;
-      return bf - af;
-    });
-    return normalized;
-  }, [row]);
-
-  const spreadPct = useMemo(() => {
-    if (!row) return null;
-    return row.spread_pct ?? computeSpreadPctFromCross(row.cross ?? null);
-  }, [row]);
-
-  const maxMin = useMemo(() => {
-    if (!cross.length) return null;
-    const valid = cross.filter((c) => c.funding !== null) as Array<{
-      exchange: string;
-      funding: number;
-      next: string | number | null;
-    }>;
-    if (valid.length === 0) return null;
-    let max = valid[0];
-    let min = valid[0];
-    for (const v of valid) {
-      if (v.funding > max.funding) max = v;
-      if (v.funding < min.funding) min = v;
-    }
-    return { max, min };
-  }, [cross]);
-
   return (
-    <div className="container mx-auto max-w-5xl py-6 space-y-6">
+    <div className="container mx-auto max-w-6xl py-6 space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={() => navigate("/funding")}
-            className="gap-2">
+          <Button variant="ghost" onClick={() => navigate("/funding")} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             Back
           </Button>
           <div>
             <div className="text-sm text-muted-foreground">Funding anomaly detail</div>
-            <div className="text-2xl font-semibold leading-tight">{symbol ?? "—"}</div>
+            <div className="text-2xl font-semibold">{symbol ?? "—"}</div>
           </div>
         </div>
 
-        <Button onClick={load} variant="secondary" className="gap-2">
+        <Button onClick={fetchLatest} className="gap-2" variant="secondary">
           <RefreshCw className="h-4 w-4" />
           Refresh
         </Button>
@@ -195,9 +151,9 @@ export default function FundingSymbolDetail() {
 
       {loading && (
         <Card>
-          <CardContent className="py-10 flex items-center justify-center gap-2">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Loading...
+          <CardContent className="py-10 flex items-center justify-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading…
           </CardContent>
         </Card>
       )}
@@ -207,9 +163,11 @@ export default function FundingSymbolDetail() {
           <CardHeader>
             <CardTitle className="text-red-500">Error</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-sm text-muted-foreground">{error}</div>
-            <Button variant="outline" onClick={() => navigate("/funding")}>Back to Funding Monitor</Button>
+          <CardContent className="space-y-4">
+            <div className="text-muted-foreground">{error}</div>
+            <Button onClick={() => navigate("/funding")} variant="secondary">
+              Back to Funding Monitor
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -223,13 +181,13 @@ export default function FundingSymbolDetail() {
               </CardHeader>
               <CardContent className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="uppercase">{row.trigger_exchange}</Badge>
-                  <span className="text-lg font-semibold">
-                    {formatPct(row.trigger_funding)}
-                  </span>
+                  <Badge variant="secondary" className="uppercase">
+                    {row.trigger_exchange}
+                  </Badge>
+                  <span className="text-lg font-semibold">{formatPct(asNumber(row.trigger_funding))}</span>
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  Threshold: {formatPct(row.threshold ?? null)} · Pre-window: {row.pre_window_min ?? 30}m
+                  Threshold: {formatPct(asNumber(row.threshold))} · Pre-window: {row.pre_window_min ?? 30}m
                 </div>
               </CardContent>
             </Card>
@@ -246,56 +204,52 @@ export default function FundingSymbolDetail() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm text-muted-foreground">Spread (max-min)</CardTitle>
+                <CardTitle className="text-sm text-muted-foreground">Spread</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <div className="text-lg font-semibold">{formatPct(spreadPct)}</div>
-                {maxMin ? (
-                  <div className="text-sm text-muted-foreground">
-                    Max: <span className="font-medium">{maxMin.max.exchange}</span> {formatPct(maxMin.max.funding)} · Min: <span className="font-medium">{maxMin.min.exchange}</span> {formatPct(maxMin.min.funding)}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">—</div>
-                )}
+                <div className="text-lg font-semibold">{formatPct(asNumber(row.spread_max_min))}</div>
+                <div className="text-sm text-muted-foreground">max(funding) − min(funding)</div>
               </CardContent>
             </Card>
           </div>
 
-          <Separator />
-
           <Card>
-            <CardHeader>
-              <CardTitle>Cross-exchange</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div className="space-y-1">
+                <CardTitle>Cross-exchange</CardTitle>
+                <div className="text-sm text-muted-foreground">
+                  Data from <span className="font-mono">funding_anomalies.cross_data</span>
+                </div>
+              </div>
+              {row.status && <Badge variant="outline" className="uppercase">{row.status}</Badge>}
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent>
               {cross.length === 0 ? (
-                <div className="text-sm text-muted-foreground">No cross-exchange data in this anomaly row.</div>
+                <div className="text-muted-foreground">No cross-exchange data in this row.</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-muted-foreground border-b">
-                        <th className="py-2 pr-3">Exchange</th>
-                        <th className="py-2 pr-3">Funding</th>
-                        <th className="py-2 pr-3">Next</th>
+                    <thead className="text-muted-foreground">
+                      <tr className="border-b">
+                        <th className="py-2 text-left">Exchange</th>
+                        <th className="py-2 text-right">Funding</th>
+                        <th className="py-2 text-left">Next</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {cross.map((c, idx) => {
-                        const isTrig = c.exchange === String(row.trigger_exchange).toUpperCase();
-                        return (
-                          <tr key={`${c.exchange}-${idx}`} className="border-b last:border-b-0">
-                            <td className="py-2 pr-3">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{c.exchange}</span>
-                                {isTrig && <Badge variant="outline">trigger</Badge>}
-                              </div>
-                            </td>
-                            <td className="py-2 pr-3 font-medium">{formatPct(c.funding)}</td>
-                            <td className="py-2 pr-3 text-muted-foreground">{formatDate(c.next)}</td>
-                          </tr>
-                        );
-                      })}
+                      {cross.map((c, idx) => (
+                        <tr key={idx} className="border-b last:border-b-0">
+                          <td className="py-2">
+                            <Badge variant="secondary" className="uppercase">
+                              {c.exchange ?? "—"}
+                            </Badge>
+                          </td>
+                          <td className="py-2 text-right font-medium">
+                            {formatPct(asNumber(c.funding))}
+                          </td>
+                          <td className="py-2">{formatDate(c.next ?? null)}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
