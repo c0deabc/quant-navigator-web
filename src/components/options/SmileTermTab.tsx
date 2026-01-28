@@ -36,18 +36,20 @@ export function SmileTermTab({ filters }: SmileTermTabProps) {
   };
   const { signals, loading: signalsLoading, error: signalsError } = useOptionsSignals(smileFilters);
 
-  const latestSnapshot = snapshots.length > 0 ? snapshots[0] : null;
+  const latestSnapshot = snapshots[0];
+  const skew25d = latestSnapshot?.skew_25d;
 
   const smileData = useMemo(() => {
-    if (!latestSnapshot) return [];
+    const s = snapshots[0];
+    if (!s) return [];
     return [
-      { delta: '10Δ Put', iv: latestSnapshot.iv_10d_put },
-      { delta: '25Δ Put', iv: latestSnapshot.iv_25d_put },
-      { delta: 'ATM', iv: latestSnapshot.atm_iv },
-      { delta: '25Δ Call', iv: latestSnapshot.iv_25d_call },
-      { delta: '10Δ Call', iv: latestSnapshot.iv_10d_call },
+      { delta: '10Δ Put', iv: s.iv_10d_put },
+      { delta: '25Δ Put', iv: s.iv_25d_put },
+      { delta: 'ATM', iv: s.atm_iv },
+      { delta: '25Δ Call', iv: s.iv_25d_call },
+      { delta: '10Δ Call', iv: s.iv_10d_call },
     ].filter((d) => d.iv !== null);
-  }, [latestSnapshot]);
+  }, [snapshots]);
 
   const termData = useMemo(() => {
     return snapshots
@@ -85,13 +87,13 @@ export function SmileTermTab({ filters }: SmileTermTabProps) {
           <CardContent>
             {loading ? (
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          ) : latestSnapshot && latestSnapshot.skew_25d !== null ? (
+            ) : skew25d != null ? (
               <div className="flex items-center gap-2">
                 <span className="text-2xl font-bold font-mono">
-                  {latestSnapshot.skew_25d >= 0 ? '+' : ''}{latestSnapshot.skew_25d?.toFixed(2)}%
+                  {skew25d >= 0 ? '+' : ''}{skew25d.toFixed(2)}%
                 </span>
-                <Badge variant={latestSnapshot.skew_25d > 0 ? 'destructive' : 'default'}>
-                  {latestSnapshot.skew_25d > 0 ? 'Put Skew' : 'Call Skew'}
+                <Badge variant={skew25d > 0 ? 'destructive' : 'default'}>
+                  {skew25d > 0 ? 'Put Skew' : 'Call Skew'}
                 </Badge>
               </div>
             ) : (
