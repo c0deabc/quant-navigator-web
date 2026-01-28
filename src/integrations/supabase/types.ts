@@ -235,6 +235,141 @@ export type Database = {
         }
         Relationships: []
       }
+      options_iv_surface_snapshots: {
+        Row: {
+          atm_iv: number | null
+          created_at: string
+          curvature_10d: number | null
+          exchange: string
+          expiry: string
+          id: string
+          iv_10d_call: number | null
+          iv_10d_put: number | null
+          iv_25d_call: number | null
+          iv_25d_put: number | null
+          iv_50d: number | null
+          raw: Json | null
+          skew_25d: number | null
+          symbol: string
+        }
+        Insert: {
+          atm_iv?: number | null
+          created_at?: string
+          curvature_10d?: number | null
+          exchange: string
+          expiry: string
+          id?: string
+          iv_10d_call?: number | null
+          iv_10d_put?: number | null
+          iv_25d_call?: number | null
+          iv_25d_put?: number | null
+          iv_50d?: number | null
+          raw?: Json | null
+          skew_25d?: number | null
+          symbol: string
+        }
+        Update: {
+          atm_iv?: number | null
+          created_at?: string
+          curvature_10d?: number | null
+          exchange?: string
+          expiry?: string
+          id?: string
+          iv_10d_call?: number | null
+          iv_10d_put?: number | null
+          iv_25d_call?: number | null
+          iv_25d_put?: number | null
+          iv_50d?: number | null
+          raw?: Json | null
+          skew_25d?: number | null
+          symbol?: string
+        }
+        Relationships: []
+      }
+      options_realized_vol_snapshots: {
+        Row: {
+          created_at: string
+          id: string
+          raw: Json | null
+          rv_14d: number | null
+          rv_30d: number | null
+          rv_60d: number | null
+          rv_7d: number | null
+          source: string | null
+          symbol: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          raw?: Json | null
+          rv_14d?: number | null
+          rv_30d?: number | null
+          rv_60d?: number | null
+          rv_7d?: number | null
+          source?: string | null
+          symbol: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          raw?: Json | null
+          rv_14d?: number | null
+          rv_30d?: number | null
+          rv_60d?: number | null
+          rv_7d?: number | null
+          source?: string | null
+          symbol?: string
+        }
+        Relationships: []
+      }
+      options_signals: {
+        Row: {
+          created_at: string
+          details: Json | null
+          direction: string
+          exchange: string
+          expiry: string
+          id: string
+          link: string | null
+          score: number
+          severity: number
+          signal_type: string
+          status: string
+          summary: string
+          symbol: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          direction: string
+          exchange: string
+          expiry: string
+          id?: string
+          link?: string | null
+          score: number
+          severity: number
+          signal_type: string
+          status?: string
+          summary: string
+          symbol: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          direction?: string
+          exchange?: string
+          expiry?: string
+          id?: string
+          link?: string | null
+          score?: number
+          severity?: number
+          signal_type?: string
+          status?: string
+          summary?: string
+          symbol?: string
+        }
+        Relationships: []
+      }
       pair_metrics: {
         Row: {
           beta: number | null

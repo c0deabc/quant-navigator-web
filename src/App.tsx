@@ -15,6 +15,7 @@ import History from "@/pages/History";
 import Settings from "@/pages/Settings";
 import FundingMonitor from "@/pages/FundingMonitor";
 import FundingSymbolDetail from "@/pages/FundingSymbolDetail";
+import Options from "@/pages/Options";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import UserManagement from "@/pages/admin/UserManagement";
 import ScanConfig from "@/pages/admin/ScanConfig";
@@ -41,6 +42,7 @@ const App = () => (
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/funding" element={<ProtectedRoute><FundingMonitor /></ProtectedRoute>} />
               <Route path="/funding/:symbol" element={<ProtectedRoute><FundingSymbolDetail /></ProtectedRoute>} />
+              <Route path="/options" element={<ProtectedRoute><Options /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
               <Route path="/admin/users" element={<ProtectedRoute requireAdmin><UserManagement /></ProtectedRoute>} />
               <Route path="/admin/scan-config" element={<ProtectedRoute requireAdmin><ScanConfig /></ProtectedRoute>} />
