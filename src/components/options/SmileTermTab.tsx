@@ -85,13 +85,13 @@ export function SmileTermTab({ filters }: SmileTermTabProps) {
           <CardContent>
             {loading ? (
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            ) : latestSnapshot?.skew_25d !== null ? (
+          ) : latestSnapshot && latestSnapshot.skew_25d !== null ? (
               <div className="flex items-center gap-2">
                 <span className="text-2xl font-bold font-mono">
-                  {latestSnapshot!.skew_25d >= 0 ? '+' : ''}{latestSnapshot!.skew_25d?.toFixed(2)}%
+                  {latestSnapshot.skew_25d >= 0 ? '+' : ''}{latestSnapshot.skew_25d?.toFixed(2)}%
                 </span>
-                <Badge variant={latestSnapshot!.skew_25d > 0 ? 'destructive' : 'default'}>
-                  {latestSnapshot!.skew_25d > 0 ? 'Put Skew' : 'Call Skew'}
+                <Badge variant={latestSnapshot.skew_25d > 0 ? 'destructive' : 'default'}>
+                  {latestSnapshot.skew_25d > 0 ? 'Put Skew' : 'Call Skew'}
                 </Badge>
               </div>
             ) : (
