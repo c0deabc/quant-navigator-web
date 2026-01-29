@@ -96,31 +96,45 @@ export default function FundingSymbolDetail() {
     setLoading(true);
     setError(null);
 
-    const { data, error } = await supabase
-      .from("funding_anomalies")
-      .select(
-        "id, created_at, symbol, trigger_exchange, trigger_funding, next_funding_ts, pre_window_min, threshold, spread_max_min, cross_data, status"
-      )
+    // Fetch the latest snapshot for this symbol from funding_snapshot table
+    const { data, error: fetchError } = await supabase
+      .from("funding_snapshot")
+      .select("id, updated_at, symbol, exchange, funding_rate, next_funding_time, quote")
       .eq("symbol", symbol)
-      .order("created_at", { ascending: false })
+      .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      setError(error.message);
+    if (fetchError) {
+      setError(fetchError.message);
       setRow(null);
       setLoading(false);
       return;
     }
 
     if (!data) {
-      setError(`No funding anomaly rows found for ${symbol}`);
+      setError(`No funding data found for ${symbol}`);
       setRow(null);
       setLoading(false);
       return;
     }
 
-    setRow(data as FundingAnomalyRow);
+    // Transform to expected shape
+    const transformed: FundingAnomalyRow = {
+      id: data.id,
+      created_at: data.updated_at,
+      symbol: data.symbol,
+      trigger_exchange: data.exchange,
+      trigger_funding: data.funding_rate,
+      next_funding_ts: data.next_funding_time || data.updated_at,
+      pre_window_min: 30,
+      threshold: null,
+      spread_max_min: null,
+      cross_data: null,
+      status: null,
+    };
+
+    setRow(transformed);
     setLoading(false);
   }
 

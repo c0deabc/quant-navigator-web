@@ -181,20 +181,35 @@ export default function FundingMonitor() {
       setLoading(true);
       setError(null);
 
-      // ВАЖНО: возвращаемся к реальной таблице
+      // Use funding_snapshot table (the actual table in the database)
       const { data, error: fetchError } = await supabase
-        .from('funding_anomalies')
+        .from('funding_snapshot')
         .select('*')
-        .eq('trigger_exchange', triggerExchange)
-        .order('created_at', { ascending: false })
+        .eq('exchange', triggerExchange)
+        .order('updated_at', { ascending: false })
         .limit(FETCH_LIMIT);
 
       if (fetchError) throw fetchError;
 
-      setRawRows((data as any) || []);
+      // Transform funding_snapshot rows to match the expected FundingAnomalyRow shape
+      const transformed: FundingAnomalyRow[] = (data || []).map((snap: any) => ({
+        id: snap.id,
+        created_at: snap.updated_at,
+        symbol: snap.symbol,
+        trigger_exchange: snap.exchange,
+        trigger_funding: snap.funding_rate,
+        next_funding_ts: snap.next_funding_time,
+        quote: snap.quote,
+        cross: null,
+        spread: null,
+        spread_pct: null,
+        status: null,
+      }));
+
+      setRawRows(transformed);
     } catch (e: any) {
       console.error('FundingMonitor fetch error:', e);
-      setError(e?.message || 'Failed to load funding anomalies');
+      setError(e?.message || 'Failed to load funding data');
       setRawRows([]);
     } finally {
       setLoading(false);
@@ -228,7 +243,7 @@ export default function FundingMonitor() {
             Funding Monitor
           </h1>
           <p className="text-muted-foreground mt-1">
-            Аномальный funding на триггерной бирже + сравнение по остальным (источник: funding_anomalies)
+            Monitor anomalous funding rates on the trigger exchange with cross-exchange comparisons
           </p>
         </div>
 
